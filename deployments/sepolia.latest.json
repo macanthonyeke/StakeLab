@@ -1,0 +1,16 @@
+{
+  "admin": "0xe555c54Ede17BDeC02AFf244ff7fBc44c9f4a177",
+  "chainId": 11155111,
+  "deployer": "0xe555c54Ede17BDeC02AFf244ff7fBc44c9f4a177",
+  "emissionPerSecond": 1000000000000000,
+  "guardian": "0xe555c54Ede17BDeC02AFf244ff7fBc44c9f4a177",
+  "initialRewardFund": "5000000000000000000000000",
+  "maxEmission": "30000000000000000000000000",
+  "minActionDelay": 0,
+  "pauser": "0xe555c54Ede17BDeC02AFf244ff7fBc44c9f4a177",
+  "protocolTreasury": "0x156E7bC791d4565802d5ec63f51E55fC3A09397E",
+  "stakeLab": "0x71942E3571A1895352096Cc737264D07843fddb6",
+  "stakingToken": "0x6FBf78ed81967A234b52308ba7b6FDc8650d9f56",
+  "timelock": "0xe555c54Ede17BDeC02AFf244ff7fBc44c9f4a177",
+  "treasury": "0xe555c54Ede17BDeC02AFf244ff7fBc44c9f4a177"
+}
