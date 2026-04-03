@@ -1,14 +1,24 @@
-# Compiler files
-cache/
-out/
+# Foundry build artifacts
+/cache/
+/out/
 
-# Ignores development broadcast logs
-!/broadcast
-/broadcast/*/31337/
-/broadcast/**/dry-run/
+# Foundry broadcast logs and local deployment snapshots
+/broadcast/
+/deployments/
 
-# Docs
-docs/
+# Dependencies
+/lib/
+/node_modules/
 
-# Dotenv file
+# Documentation output
+/docs/
+
+# Local environment and secrets
 .env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Accidental CLI-flag files created in the repo root
+/--*
