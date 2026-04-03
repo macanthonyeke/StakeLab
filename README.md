@@ -1,207 +1,195 @@
-# StakeLab Protocol 
+# StakeLab
 
-StakeLab is a staking protocol where users lock a single ERC20 token, earn streamed rewards, and can close positions early with configurable penalties.
+StakeLab is a single-token ERC20 staking protocol built around three ideas:
+- streamed rewards instead of one-off reward snapshots
+- configurable lock periods with early-exit penalties
+- explicit solvency accounting so principal, rewards, and protocol fees stay separated
 
-This repository contains:
-- Core protocol contract: `src/StakeLab.sol` (`StakeLab`)
-- ERC20 staking token: `src/StakeLabToken.sol` (`StakeLabToken`)
-- Public interface: `src/Interface/IStakeLab.sol`
-- Optional treasury vault contract: `src/Protocol-Treasury.sol`
-- Unit, fuzz, invariant, and adversarial tests under `test/`
+The project is designed as a clean, auditable staking system for testnet deployment and protocol simulation. It includes the core contracts, a production ERC20 token for Sepolia, and a full Foundry test suite covering unit, fuzz, invariant, adversarial, and economic simulation cases.
 
-## System Architecture
+## What This Project Shows
 
-### Core State
-`StakeLab` tracks three liabilities that define solvency:
-- `totalPrincipalLiability`: total user principal owed
-- `rewardTreasuryLiability`: reward budget still owed
-- `protocolFeeLiability`: accumulated penalty fees owed to protocol treasury
+StakeLab is meant to demonstrate thoughtful protocol engineering rather than just a basic stake-and-unstake flow.
 
-The solvency lens is:
-`stakingToken.balanceOf(core) >= principal + rewards + protocolFees`
+Key design choices:
+- single-asset staking to keep the accounting and reward surface simple
+- reward streaming through a global accumulator
+- early withdrawal penalties as protocol revenue
+- timelocked admin actions for sensitive parameter changes
+- explicit solvency tracking through liabilities, not just raw token balances
+- strong test coverage around failure modes, not only happy paths
+
+## Best Use Case
+
+StakeLab fits best when you want a staking product with:
+- one staking token
+- one reward token, identical to the staking asset
+- predictable emissions with a hard cap
+- configurable lock durations
+- treasury-safe accounting for rewards, user principal, and fees
+
+It is not intended to be:
+- a multi-token farm
+- an LP staking system
+- a vault strategy product
+- a generalized reward distributor
+
+## Architecture
+
+### Core Contracts
+
+- `src/StakeLab.sol`: main staking protocol
+- `src/StakeLabToken.sol`: ERC20 token used for real Sepolia deployments
+- `src/Protocol-Treasury.sol`: optional treasury receiver for captured surplus and protocol fees
+- `src/Interface/IStakeLab.sol`: interface, structs, and events
 
 ### Position Model
-Each position stores:
+
+Each stake is represented as a position with:
 - `owner`
 - `amount`
-- `rewardDebt` (snapshot of index at last settle point)
+- `rewardDebt`
 - `startTime`
 - `lockDuration`
 - `active`
 
-Positions are append-only IDs (`nextPositionId`) and user position IDs are tracked for pagination.
+Positions are append-only and identified by incremental IDs. A single wallet can hold multiple simultaneous positions across different lock durations.
 
-## Staking Lifecycle
+### Solvency Model
 
-### 1) Open Position
+StakeLab tracks three liabilities:
+- `totalPrincipalLiability`: principal owed back to stakers
+- `rewardTreasuryLiability`: reward budget promised but not yet paid
+- `protocolFeeLiability`: penalties accumulated for protocol treasury
+
+The core solvency invariant is:
+
+```text
+stakingToken.balanceOf(address(core)) >=
+    totalPrincipalLiability + rewardTreasuryLiability + protocolFeeLiability
+```
+
+This is a meaningful design choice: the protocol does not treat its token balance as freely spendable. Instead, it accounts for what portion of that balance is already economically committed.
+
+### Reward Engine
+
+Rewards are streamed over time through a global accumulator:
+- `accRewardPerShare`
+- updated lazily on state-changing actions
+- capped by `maxEmission`
+- capped by funded reward inventory
+
+This means emissions cannot exceed either:
+- the protocol-wide emission cap, or
+- the amount actually funded into the reward treasury
+
+### Lock Durations and Penalties
+
+Users can only open positions in lock durations that governance has explicitly enabled. Each lock duration has a penalty basis-point value configured through `setPenaltyBps`.
+
+That design prevents a common mistake in staking systems where users can bypass intended penalty rules by choosing unsupported durations.
+
+## User Flows
+
 `openPosition(amount, lockDuration)`
-- Validates non-zero amount
-- Validates lock duration is enabled (`validLockDuration[lockDuration] == true`)
-- Updates reward index
-- Transfers stake token from user to protocol
-- Creates active position and increases `totalPrincipalLiability`
+- transfers staking tokens into the protocol
+- creates a new active position
+- increases principal liability
 
-### 2) Claim Rewards
 `claim(positionId)`
-- Only owner of an active position
-- Updates reward index
-- Computes pending reward from index delta
-- Reverts if pending reward is zero
-- Reverts if pending reward exceeds `rewardTreasuryLiability`
-- Updates position `rewardDebt`, decrements reward liability, transfers reward
+- pays only accrued rewards
+- leaves principal locked
+- reduces reward liability
 
-### 3) Close Position
 `closePosition(positionId)`
-- Only owner of an active position
-- Updates reward index and computes pending reward
-- If closed before lock end, applies configured penalty:
-  - `penalty = amount * penaltyBps / 10_000`
-  - `principalPaid = amount - penalty`
-- If lock matured, no penalty
-- Requires reward liquidity (`rewardPaid <= rewardTreasuryLiability`)
-- Deactivates position, zeros amount/debt, decrements principal liability
-- Credits penalty to `protocolFeeLiability`
-- Transfers principal and reward
+- pays principal and accrued rewards
+- applies penalty if closed before maturity
+- credits the penalty into protocol fee liability
 
-### 4) Emergency Withdraw (Paused Mode)
-`emergencyWithdraw(positionId)` is only available while paused.
-- Returns principal only
-- No reward payment
-- Deactivates position and reduces principal liability
+`emergencyWithdraw(positionId)`
+- only while paused
+- returns principal only
+- forfeits reward payout
 
-## Reward Emission System
+## Governance and Safety Controls
 
-Rewards are streamed by a global accumulator:
-- `accRewardPerShare` with precision `1e18`
-- Updated lazily in `_updateGlobalIndex()`
+### Roles
 
-Emission for elapsed time:
-- `potentialEmission = elapsed * emissionPerSecond`
-- Capped by remaining emission cap: `maxEmission - totalEmitted`
-- Capped by current reward liability (`rewardTreasuryLiability`)
-
-When remaining emission cap is reached:
-- `emissionFinished = true`
-- `emissionPerSecond = 0`
-
-`previewClaim(positionId)` simulates the same logic without state mutation.
-
-## Treasury Accounting
-
-### Reward Funding
-`fundRewards(amount)` (TREASURY_ROLE):
-- Transfers tokens into protocol
-- Increases `rewardTreasuryLiability`
-
-### Protocol Fees
-Early-exit penalties accumulate in `protocolFeeLiability`.
-
-`withdrawProtocolFees(amount, actionId)` (TREASURY_ROLE + timelocked action):
-- Requires `amount <= protocolFeeLiability`
-- Decreases fee liability
-- Transfers to `protocolTreasury`
-
-### Surplus Capture
-`captureSurplus(amount, actionId)` (TREASURY_ROLE + timelocked action):
-- Computes `encumbered = principal + rewards + protocolFees`
-- Only allows transfer of balance above encumbered amount
-- Prevents draining liabilities
-
-## Penalty Mechanics
-
-Penalty schedule is configured by governance per lock duration:
-- `setPenaltyBps(lockDuration, newPenaltyBps, actionId)`
-- `newPenaltyBps <= 10_000`
-
-Duration activation model:
-- A lock duration becomes usable when configured through `setPenaltyBps`
-- The function sets `validLockDuration[lockDuration] = true`
-- `openPosition` rejects unconfigured durations
-
-This prevents zero-penalty bypasses using arbitrary lock durations.
-
-## Governance and Controls
-
-Access control uses OpenZeppelin `AccessControl`:
-- `PAUSER_ROLE`: pause/unpause
-- `PARAM_ROLE`: set emission rate, set penalty bps
-- `TREASURY_ROLE`: fund rewards, withdraw fees, capture surplus
-- `TIMELOCK_ROLE`: queue governance actions
+- `PAUSER_ROLE`: pause and unpause the protocol
+- `PARAM_ROLE`: set emission rate and penalty schedule
+- `TREASURY_ROLE`: fund rewards, withdraw protocol fees, capture surplus
+- `TIMELOCK_ROLE`: queue protected actions
 - `GUARDIAN_ROLE`: cancel queued actions
 
-Timelock flow:
-1. `queueAction(actionId)` by TIMELOCK_ROLE
-2. Wait `MIN_ACTION_DELAY`
-3. Execute within `EXECUTION_WINDOW` with the expected `actionId`
-4. Guardian may cancel before expiry
-5. Cancelled actions have `REQUEUE_COOLDOWN`
+### Timelocked Actions
 
-## Solvency Invariants (Tested)
+These sensitive actions require queue-and-execute flow:
+- `setEmissionPerSecond`
+- `setPenaltyBps`
+- `withdrawProtocolFees`
+- `captureSurplus`
 
-The invariant suite (`test/StakeLabInvariant.t.sol`) enforces:
-- **Solvency:** contract token balance always backs all liabilities
-- **Emission cap:** `totalEmitted <= maxEmission`
-- **Reward accounting:** total claimed by handler <= total funded by handler
-- **No negative accounting:** liabilities never underflow
-- **Position ownership stability**
-- **Closed positions cannot be reused**
+That reduces the risk of instant admin changes to economics-critical parameters.
 
-Adversarial tests (`test/StakeLabAdversarial.t.sol`) additionally stress:
-- Reward-draining attempts
-- Penalty bypass attempts
-- Emission overflow griefing
-- Treasury underfunding/starvation scenarios
-- Rapid open/close cycles
+## Testing Strategy
 
-## Repository Layout
+This repo includes:
+- unit tests in `test/StakeLab.t.sol`
+- fuzz tests in `test/StakeLabFuzz.t.sol`
+- invariant tests in `test/StakeLabInvariant.t.sol`
+- adversarial tests in `test/StakeLabAdversarial.t.sol`
+- simulation tests in `test/YieldCoreSimulation.t.sol`
 
-- `src/StakeLab.sol`: main protocol implementation
-- `src/StakeLabToken.sol`: production ERC20 token used for Sepolia deployments
-- `src/Interface/IStakeLab.sol`: protocol interface/events
-- `src/Protocol-Treasury.sol`: auxiliary token vault for treasury ops
-- `test/mocks/MockERC20.sol`: test-only mintable ERC20 mock
-- `test/StakeLab.t.sol`: lifecycle and access-control unit tests
-- `test/StakeLabFuzz.t.sol`: fuzz coverage for amounts, timings, penalties
-- `test/StakeLabInvariant.t.sol`: stateful invariant tests
-- `test/StakeLabAdversarial.t.sol`: targeted adversarial simulations
+The test suite covers:
+- solvency preservation
+- emission-cap enforcement
+- reward accounting correctness
+- treasury underfunding scenarios
+- early-exit penalty enforcement
+- attempts to drain rewards or bypass lock restrictions
+- high-volume open/close/claim activity over time
 
-## Development
-
-### Build
-```bash
-forge build
-```
-
-### Test
-```bash
-forge test
-```
-
-### Format
-```bash
-forge fmt
-```
+This is one of the strongest parts of the project because it validates not just features, but protocol behavior under stress and hostile conditions.
 
 ## Sepolia Deployment
 
-The repo now includes a Foundry broadcast script at `script/DeploySepolia.s.sol`.
+The deployment flow is built around `script/DeploySepolia.s.sol`.
 
 Default behavior:
-- deploys a real ERC20 staking token (`StakeLabToken`) if `STAKING_TOKEN` is not set
-- deploys `protocolTreasury` if `PROTOCOL_TREASURY` is not set
-- deploys `StakeLab`
-- funds rewards if the deployer is also the treasury role
-- queues and executes the 7d, 30d, and 90d penalty configs if the deployer also controls `TIMELOCK` and `ADMIN` and `MIN_ACTION_DELAY=0`
+- deploy `StakeLabToken` if `STAKING_TOKEN` is not provided
+- deploy `Protocol-Treasury` if `PROTOCOL_TREASURY` is not provided
+- deploy `StakeLab`
+- optionally fund the protocol at deployment time
+- optionally queue and execute default lock penalties for 7d, 30d, and 90d durations
 
-Recommended Sepolia env:
+### Current Status
+
+There is no current Sepolia deployment recorded in this repo.
+
+Older local Sepolia deployment artifacts were intentionally removed so this repository would not keep advertising obsolete contract addresses as current.
+
+When a fresh deployment is made, document the live addresses here:
+- `StakeLabToken`: `0x185b8074b2fa2182742153c62a66fcdb9acfd580`
+- `Protocol-Treasury`: `0xc90038ab7b209775ded8e74212f375d2c4bd5943`
+- `StakeLab`: `0xb98479a111f157de8a966f054489c49d6dd2b772`
+
+### Recommended Environment
 
 ```bash
-export SEPOLIA_RPC_URL="https://your-sepolia-rpc"
+export SEPOLIA_RPC_URL="https://eth-sepolia.g.alchemy.com/v2/OL3XJG8UTLmV0IXER3dvv"
 export PRIVATE_KEY="0x..."
+
+export TOKEN_NAME="StakeLab Token"
+export TOKEN_SYMBOL="SLT"
+export TOKEN_INITIAL_SUPPLY="50000000000000000000000000"
+export TOKEN_INITIAL_HOLDER="0xe555c54Ede17BDeC02AFf244ff7fBc44c9f4a177"
+
+export INITIAL_REWARD_FUND="5000000000000000000000000"
 export MIN_ACTION_DELAY=0
 ```
 
-Optional overrides:
+### Optional Environment Overrides
+
 - `STAKING_TOKEN`
 - `ADMIN`
 - `PAUSER`
@@ -210,15 +198,11 @@ Optional overrides:
 - `GUARDIAN`
 - `PROTOCOL_TREASURY`
 - `PROTOCOL_TREASURY_ADMIN`
-- `TOKEN_INITIAL_HOLDER`
-- `TOKEN_NAME`
-- `TOKEN_SYMBOL`
-- `TOKEN_INITIAL_SUPPLY`
-- `INITIAL_REWARD_FUND`
 - `EMISSION_PER_SECOND`
 - `MAX_EMISSION`
+- `WRITE_DEPLOYMENT_JSON`
 
-Broadcast to Sepolia:
+### Deploy Command
 
 ```bash
 forge script script/DeploySepolia.s.sol:DeploySepolia \
@@ -226,4 +210,28 @@ forge script script/DeploySepolia.s.sol:DeploySepolia \
   --broadcast -vvvv
 ```
 
-If you also want a local deployment summary file, set `WRITE_DEPLOYMENT_JSON=true` before broadcasting. The script will then write `deployments/sepolia.latest.json`.
+If `WRITE_DEPLOYMENT_JSON=true`, the script writes `deployments/sepolia.latest.json`.
+
+Important note:
+- automatic reward funding only works when `TREASURY == deployer`, because the script broadcasts from the deployer key
+- if treasury is a different address, deploy first and fund rewards in a separate step
+
+## Local Development
+
+Build:
+
+```bash
+forge build
+```
+
+Test:
+
+```bash
+forge test
+```
+
+Format:
+
+```bash
+forge fmt
+```
