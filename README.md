@@ -4,6 +4,7 @@ StakeLab is a staking protocol where users lock a single ERC20 token, earn strea
 
 This repository contains:
 - Core protocol contract: `src/StakeLab.sol` (`StakeLab`)
+- ERC20 staking token: `src/StakeLabToken.sol` (`StakeLabToken`)
 - Public interface: `src/Interface/IStakeLab.sol`
 - Optional treasury vault contract: `src/Protocol-Treasury.sol`
 - Unit, fuzz, invariant, and adversarial tests under `test/`
@@ -155,8 +156,10 @@ Adversarial tests (`test/StakeLabAdversarial.t.sol`) additionally stress:
 ## Repository Layout
 
 - `src/StakeLab.sol`: main protocol implementation
+- `src/StakeLabToken.sol`: production ERC20 token used for Sepolia deployments
 - `src/Interface/IStakeLab.sol`: protocol interface/events
 - `src/Protocol-Treasury.sol`: auxiliary token vault for treasury ops
+- `test/mocks/MockERC20.sol`: test-only mintable ERC20 mock
 - `test/StakeLab.t.sol`: lifecycle and access-control unit tests
 - `test/StakeLabFuzz.t.sol`: fuzz coverage for amounts, timings, penalties
 - `test/StakeLabInvariant.t.sol`: stateful invariant tests
@@ -184,7 +187,7 @@ forge fmt
 The repo now includes a Foundry broadcast script at `script/DeploySepolia.s.sol`.
 
 Default behavior:
-- deploys a mock ERC20 staking token if `STAKING_TOKEN` is not set
+- deploys a real ERC20 staking token (`StakeLabToken`) if `STAKING_TOKEN` is not set
 - deploys `protocolTreasury` if `PROTOCOL_TREASURY` is not set
 - deploys `StakeLab`
 - funds rewards if the deployer is also the treasury role
@@ -207,13 +210,13 @@ Optional overrides:
 - `GUARDIAN`
 - `PROTOCOL_TREASURY`
 - `PROTOCOL_TREASURY_ADMIN`
+- `TOKEN_INITIAL_HOLDER`
+- `TOKEN_NAME`
+- `TOKEN_SYMBOL`
+- `TOKEN_INITIAL_SUPPLY`
 - `INITIAL_REWARD_FUND`
 - `EMISSION_PER_SECOND`
 - `MAX_EMISSION`
-- `MOCK_TOKEN_NAME`
-- `MOCK_TOKEN_SYMBOL`
-- `MOCK_TOKEN_TREASURY_MINT`
-- `MOCK_TOKEN_DEPLOYER_MINT`
 
 Broadcast to Sepolia:
 

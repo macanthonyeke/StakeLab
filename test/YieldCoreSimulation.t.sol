@@ -47,10 +47,10 @@ contract YieldCoreSimulationTest is StakeLabTestBase {
 
             _runRandomizedAction(
                 seed,
-                8,  // open
+                8, // open
                 12, // claim
-                8,  // close
-                4,  // fund
+                8, // close
+                4, // fund
                 68, // warp
                 1 minutes,
                 30 days
@@ -219,7 +219,7 @@ contract YieldCoreSimulationTest is StakeLabTestBase {
                 25, // open
                 35, // claim
                 25, // close
-                0,  // no extra funding in underfunding scenario
+                0, // no extra funding in underfunding scenario
                 15, // warp
                 1 hours,
                 14 days
@@ -487,7 +487,8 @@ contract YieldCoreSimulationTest is StakeLabTestBase {
 
     function _assertEconomicInvariantsAt(uint256 step, string memory phase) internal {
         uint256 contractBalance = token.balanceOf(address(core));
-        uint256 liabilities = core.totalPrincipalLiability() + core.rewardTreasuryLiability() + core.protocolFeeLiability();
+        uint256 liabilities =
+            core.totalPrincipalLiability() + core.rewardTreasuryLiability() + core.protocolFeeLiability();
         uint256 emitted = core.totalEmitted();
         uint256 emissionCap = core.maxEmission();
 

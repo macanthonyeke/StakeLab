@@ -375,7 +375,6 @@ contract StakeLab is IStakeLab, AccessControl, Pausable, ReentrancyGuard {
 
         uint256 remaining = length - start;
         uint256 resultLength = limit > remaining ? remaining : limit;
-        uint256 end = start + resultLength;
         result = new uint256[](resultLength);
 
         for (uint256 i = 0; i < resultLength; i++) {

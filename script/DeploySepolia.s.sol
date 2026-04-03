@@ -7,7 +7,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 import {StakeLab} from "../src/StakeLab.sol";
 import {protocolTreasury} from "../src/Protocol-Treasury.sol";
-import {MockERC20} from "../src/mocks/MockERC20.sol";
+import {StakeLabToken} from "../src/StakeLabToken.sol";
 
 contract DeploySepolia is Script {
     using SafeERC20 for IERC20;
@@ -32,15 +32,15 @@ contract DeploySepolia is Script {
         address protocolTreasuryAdmin;
         address stakingToken;
         address protocolTreasury;
-        string mockTokenName;
-        string mockTokenSymbol;
+        address tokenInitialHolder;
+        string tokenName;
+        string tokenSymbol;
         uint256 minActionDelay;
         uint256 emissionPerSecond;
         uint256 maxEmission;
-        uint256 mockTreasuryMint;
-        uint256 mockDeployerMint;
+        uint256 tokenInitialSupply;
         uint256 initialRewardFund;
-        bool deployMockToken;
+        bool deployStakingToken;
     }
 
     function run() external returns (StakeLab core, address stakingToken, address treasuryAddress) {
@@ -52,11 +52,11 @@ contract DeploySepolia is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        if (config.deployMockToken) {
-            MockERC20 mock = new MockERC20(config.mockTokenName, config.mockTokenSymbol);
-            config.stakingToken = address(mock);
-            mock.mint(deployer, config.mockDeployerMint);
-            mock.mint(config.treasurer, config.mockTreasuryMint);
+        if (config.deployStakingToken) {
+            StakeLabToken token = new StakeLabToken(
+                config.tokenInitialHolder, config.tokenName, config.tokenSymbol, config.tokenInitialSupply
+            );
+            config.stakingToken = address(token);
         }
 
         if (config.protocolTreasury == address(0)) {
@@ -127,18 +127,16 @@ contract DeploySepolia is Script {
         config.protocolTreasuryAdmin = vm.envOr("PROTOCOL_TREASURY_ADMIN", config.admin);
         config.stakingToken = vm.envOr("STAKING_TOKEN", address(0));
         config.protocolTreasury = vm.envOr("PROTOCOL_TREASURY", address(0));
-        config.mockTokenName = vm.envOr("MOCK_TOKEN_NAME", string("Mock Stake"));
-        config.mockTokenSymbol = vm.envOr("MOCK_TOKEN_SYMBOL", string("MSTK"));
+        config.tokenInitialHolder = vm.envOr("TOKEN_INITIAL_HOLDER", config.treasurer);
+        config.tokenName = vm.envOr("TOKEN_NAME", string("StakeLab Token"));
+        config.tokenSymbol = vm.envOr("TOKEN_SYMBOL", string("SLT"));
         config.minActionDelay = vm.envOr("MIN_ACTION_DELAY", uint256(0));
         config.emissionPerSecond = vm.envOr("EMISSION_PER_SECOND", uint256(1e15));
         config.maxEmission = vm.envOr("MAX_EMISSION", uint256(30_000_000 * ONE));
-        config.mockTreasuryMint = vm.envOr("MOCK_TOKEN_TREASURY_MINT", uint256(50_000_000 * ONE));
-        config.mockDeployerMint = vm.envOr("MOCK_TOKEN_DEPLOYER_MINT", uint256(1_000_000 * ONE));
-        config.deployMockToken = config.stakingToken == address(0);
-        config.initialRewardFund = vm.envOr(
-            "INITIAL_REWARD_FUND",
-            config.deployMockToken ? uint256(5_000_000 * ONE) : uint256(0)
-        );
+        config.tokenInitialSupply = vm.envOr("TOKEN_INITIAL_SUPPLY", uint256(50_000_000 * ONE));
+        config.deployStakingToken = config.stakingToken == address(0);
+        config.initialRewardFund =
+            vm.envOr("INITIAL_REWARD_FUND", config.deployStakingToken ? uint256(5_000_000 * ONE) : uint256(0));
     }
 
     function _configurePenalty(
