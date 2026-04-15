@@ -36,6 +36,7 @@ contract StakeLab is IStakeLab, AccessControl, Pausable, ReentrancyGuard {
     uint256 public lastRewardUpdate;
     uint256 public maxEmission;
     uint256 public totalEmitted;
+    uint256 public dust;
 
     bool public emissionFinished;
 
@@ -89,6 +90,14 @@ contract StakeLab is IStakeLab, AccessControl, Pausable, ReentrancyGuard {
         _grantRole(TREASURY_ROLE, treasurer);
         _grantRole(TIMELOCK_ROLE, timelock);
         _grantRole(GUARDIAN_ROLE, guardian);
+
+        validLockDuration[7 days] = true;
+        validLockDuration[30 days] = true;
+        validLockDuration[90 days] = true;
+
+        penaltyBpsByLockDuration[7 days] = 300; // 3%
+        penaltyBpsByLockDuration[30 days] = 900; // 9%
+        penaltyBpsByLockDuration[90 days] = 1500; // 15%
     }
 
     function openPosition(uint256 amount, uint256 lockDuration)
@@ -403,33 +412,34 @@ contract StakeLab is IStakeLab, AccessControl, Pausable, ReentrancyGuard {
             return;
         }
 
-        // if (totalEmitted >= maxEmission) {
-        //     emissionFinished = true;
-        //     emissionPerSecond = 0;
-        //     lastRewardUpdate = block.timestamp;
-        //     return;
-        // }
-
         uint256 elapsed = block.timestamp - lastRewardUpdate;
 
-        uint256 potentialEmission = elapsed * emissionPerSecond;
+        uint256 emission = elapsed * emissionPerSecond;
 
-        uint256 remainingEmission = maxEmission - totalEmitted;
+        uint256 remaining = maxEmission - totalEmitted;
+        if (emission > remaining) {
+            emission = remaining;
+        }
 
-        if (potentialEmission >= remainingEmission) {
-            potentialEmission = remainingEmission;
+        if (emission > rewardTreasuryLiability) {
+            emission = rewardTreasuryLiability;
+        }
+
+        if (emission > 0) {
+            uint256 scaled = emission * PRECISION;
+
+            uint256 distributed = scaled / totalPrincipalLiability;
+            uint256 remainder = scaled % totalPrincipalLiability;
+
+            accRewardPerShare += distributed;
+            dust += remainder;
+
+            totalEmitted += emission;
+        }
+
+        if (totalEmitted >= maxEmission) {
             emissionFinished = true;
             emissionPerSecond = 0;
-        }
-
-        if (potentialEmission > rewardTreasuryLiability) {
-            potentialEmission = rewardTreasuryLiability;
-        }
-
-        if (potentialEmission > 0) {
-            accRewardPerShare += (potentialEmission * PRECISION) / totalPrincipalLiability;
-
-            totalEmitted += potentialEmission;
         }
 
         lastRewardUpdate = block.timestamp;
