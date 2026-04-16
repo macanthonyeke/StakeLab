@@ -55,13 +55,13 @@ contract StakeLab is IStakeLab, AccessControl, Pausable, ReentrancyGuard {
     error InvalidPenaltyBps();
     error NotPositionOwner();
     error PositionInactive();
-    // error PositionStillLocked();
     error NoRewards();
     error InsufficientRewardTreasury();
     error ActionNotQueued();
     error ActionTooEarly();
     error ActionExpired();
     error InsufficientProtocolFeeAmount();
+    error EmissionAlreadyFinished(); 
 
     constructor(
         IERC20 _stakingToken,
@@ -251,6 +251,8 @@ contract StakeLab is IStakeLab, AccessControl, Pausable, ReentrancyGuard {
     }
 
     function setEmissionPerSecond(uint256 newRate, bytes32 actionId) external onlyRole(PARAM_ROLE) {
+        if (emissionFinished) revert EmissionAlreadyFinished();
+
         bytes32 expectedActionId = keccak256(abi.encode(this.setEmissionPerSecond.selector, newRate));
 
         _consumeQueuedAction(actionId, expectedActionId);
@@ -435,6 +437,13 @@ contract StakeLab is IStakeLab, AccessControl, Pausable, ReentrancyGuard {
             dust += remainder;
 
             totalEmitted += emission;
+        }
+
+        // redistribute accumulated dust when enough has built up
+        if (dust >= totalPrincipalLiability) {
+            uint256 extra = dust / totalPrincipalLiability;
+            dust = dust % totalPrincipalLiability;
+            accRewardPerShare += extra;
         }
 
         if (totalEmitted >= maxEmission) {
